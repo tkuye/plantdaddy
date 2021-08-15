@@ -3,24 +3,13 @@
 #esp.osdebug(None)
 #import webrepl
 #webrepl.start()
+import ujson
 
 def get_configs():
     """Gets the configurations for the module.
     """
-    configs = dict()
-    with open("config.txt") as f:
-        for line in f.readlines():
-            line = line.strip()
-            if line.startswith("#"):
-                continue
-            key_val = line.split("=")
-            if len(key_val) != 2:
-                continue
-            key = key_val[0]
-            value = key_val[1]
-            configs[key] = value
-
-        return configs
+    with open("config.json") as f:
+       return ujson.load(f)
 
 def do_connect(ssid: str, password: str):
     """
