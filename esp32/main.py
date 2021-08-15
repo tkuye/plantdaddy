@@ -7,6 +7,8 @@ import machine
 from machine import ADC, Pin
 import dht
 import time
+import urequests
+import ujson
 
 MS_TO_SECS = 1000
 
@@ -38,10 +40,10 @@ def get_moisture_level():
 	if voltage_read > dry_max:
 		dry_max = voltage_read
 		CONFIGURATIONS["dry_max"]  = voltage_read
-		write_to_config("dry_max", voltage_read)
+		write_to_config()
 	elif voltage_read < wet_max:
 		CONFIGURATIONS["wet_max"] = voltage_read
-		write_to_config("wet_max", voltage_read)
+		write_to_config()
 	return get_percentage(dry_max, wet_max, voltage_read) * 100
 
 
@@ -66,42 +68,102 @@ def get_percentage(maxi: int, mini: int, value: int):
 	"""
 	return ((maxi - value) / (maxi - mini))
 
-def write_to_config(ckey: str, cvalue):
+def write_to_config():
 	"""Writes a key value pair to the config file.
 
 	Args:
 		key (str): The key to write to the config file.
 		value (Any): The value to write to the config file.
 	"""
-	with open("config.txt", "r+") as f:
-		lines = []
-		found_line = False
-		for line in f.readlines():
-			key = line.split("=")[0]
-			if key == ckey:
-				line = "{}={}\n".format(ckey, cvalue)
-				found_line = True
-			lines.append(line)
-		if not found_line:
-			lines.append("{}={}\n".format(ckey, cvalue))
-		f.seek(0)
-		lines = "".join(lines)
-		f.write(lines)
+	global CONFIGURATIONS
+	with open("config.json", "w") as f:
+		ujson.dump(CONFIGURATIONS, f)
 
+
+def get_session_id():
+	"""
+	Creates an http response to get the sessionID from the server
+	"""
+	global CONFIGURATIONS
+
+	device_id = CONFIGURATIONS.get("deviceID")
+	url:str = CONFIGURATIONS.get("url")
+
+	device_obj = ujson.dumps({"deviceID": device_id})
+	res = post_data("/auth-device", device_obj)
+	for key, val in res.json().items():
+		CONFIGURATIONS[key] = val
+	write_to_config()
+
+def post_data(path: str, data: str) -> urequests.Response:
+	"""
+	Encloses the data for simple post requests.
+
+	Args:
+		path (str): The path to the data.
+		data (str): The data to send to the server.
+
+	Returns:
+		urequests.Response: [description]
+	"""
+	global CONFIGURATIONS
+	url = CONFIGURATIONS.get("url")
+	res = urequests.post(url + path, 
+	headers={'content-type':'application/json'},
+	data=data)
+	return res
+
+
+def send_plant_data(temperature: int, humidity: int, soil_moisture: float, light: int):
+	"""Send the plant data to the server
+
+	Args:
+		temperature (int)
+		humidity (int)
+		soil_moisture (float)
+		light (int)
+	"""
+	global CONFIGURATIONS
+	url = CONFIGURATIONS.get("url")
+	session_id = CONFIGURATIONS.get("sessionID")
+	usage_counter = CONFIGURATIONS.get("usageCounter")
+	timestamp = CONFIGURATIONS.get("timestamp")
+
+	data = {"sessionID":session_id,
+	"usageCounter":usage_counter,
+	"timestamp": timestamp,
+	"temperature":temperature,
+	"humidity":humidity,
+	"soilMoisture":soil_moisture,
+	"light":light}
+
+	json_data = ujson.dumps(data)
+
+	res = post_data("/new-data", json_data)
+	for key, value in res.json().items():
+		CONFIGURATIONS[key] = value
+	write_to_config()
 
 def main():
 	"""
 	Runs the main function for the program.
 	"""
+
+	# Assume it is not none
+	global CONFIGURATIONS
+	sessionID = CONFIGURATIONS.get("sessionID")
+
+	# If is is none now we send our request to get one.
+	if sessionID is None:
+		get_session_id()
+	
+
+
 	try:
 		light = get_light_level()
 		temperature, humidity = get_temperature()
 		soil_moisture = get_moisture_level()
-		print("Current Temperature: {:d}\u2103 \tCurrent Humidity:{:d}%\tCurrent Soil Moisture: {:>.3f}%\tCurrent Light: {:>.3f}%"
-			.format(temperature,
-			humidity,
-			soil_moisture,
-			light))
+		send_plant_data(temperature, humidity, soil_moisture, light)
 		# Send the device to sleep after retrieving the data
 		# Sleep for 10 minutes
 		# Must regular sleep so commands can be sent
