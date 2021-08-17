@@ -27,7 +27,7 @@ func logIn(w http.ResponseWriter, r *http.Request) {
 	var login Login;
 	
 	if r.Method == "POST" {
-		log.Printf("New Request")
+		log.Printf("New Request %s", r.URL)
 		// Check if the content type is correct
 		if r.Header.Get("Content-Type") != "application/json" {
 			msg := "Content-type header is not application/json"
@@ -67,7 +67,7 @@ func logIn(w http.ResponseWriter, r *http.Request) {
 func newSessionData(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method == "POST" {
-	log.Printf("New Request: %v", r.Body)
+	log.Printf("New Request %s", r.URL)
 	
 	if r.Header.Get("Content-Type") != "application/json" {
 			msg := "Content-type header is not application/json"
