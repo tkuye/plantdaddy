@@ -55,7 +55,7 @@ func hashBytes(login *Login, session *SessionData) (Session, error) {
 	 newSession := Session{
 		SessionID: hex.EncodeToString(sha.Sum(nil)),
 		UsageCounter: 10,
-		Timestamp: time.Now(),
+		Timestamp: time.Now().UTC(),
 	 }
 
 	return newSession, nil

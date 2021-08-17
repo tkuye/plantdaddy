@@ -25,4 +25,5 @@ type SessionData struct {
 	Humidity int `json:"humidity"`
 	SoilMoisture float64 `json:"soilMoisture"`
 	Light float64 `json:"light"`
+	DeviceID string `json:"deviceID"`
 }	
