@@ -2,18 +2,19 @@ package main
 
 import (
 	"database/sql"
-	_ "github.com/lib/pq"
 	"log"
 	"time"
+
+	_ "github.com/lib/pq"
 )
 
 
 func connectToDb(connString string) *sql.DB {
-
 	db, err := sql.Open("postgres", connString)
 	if err != nil {
 		log.Fatal(err)
 	}
+	
 	return db
 }
 
@@ -48,31 +49,36 @@ func getSession(db *sql.DB, login *Login) Session {
 		if errs != nil {
 			log.Fatal(errs)
 		}
-		db.Query(`INSERT INTO session(session_id, usage_time, usage, device_id) VALUES ($1, $2, $3, $4) 
-		ON CONFLICT DO UPDATE SET session_id=$1, usage_time=$2, usage=$3`, 
+		_, err := db.Query(`INSERT INTO session(session_id, usage_time, usage, device_id) VALUES ($1, $2, $3, $4) 
+		ON CONFLICT (device_id) DO UPDATE SET session_id=$1, usage_time=$2, usage=$3`, 
 		hashedLogin.SessionID, hashedLogin.Timestamp, hashedLogin.UsageCounter, login.DeviceID)
+
+		if err != nil {
+			log.Fatal(err)
+		}
+
 		return hashedLogin
 }
 
 func insertSessionData(sessionData SessionData, db *sql.DB) Session {
-
-	db.Query(`
+	_, errs := db.Query(`
 	INSERT INTO plant_data(device_id, time, temperature, humidity, soil_moisture, light)
-	VALUES ($1, $2, $3, $4, $5)
+	VALUES ($1, $2, $3, $4, $5, $6)
 	`, sessionData.DeviceID, time.Now().UTC(), 
 	sessionData.Temperature, 
 	sessionData.Humidity, 
 	sessionData.SoilMoisture, 
 	sessionData.Light)
 
+	if errs != nil {
+		log.Fatal(errs)
+	}
+
 	row := db.QueryRow("SELECT session_id, usage, usage_time FROM session WHERE session_id=$1", sessionData.SessionID)
-	var _session Session
+	var session Session
 
-	err := row.Scan(&_session)
-
-
-
-	if err == sql.ErrNoRows || sessionData.UsageCounter == 0 || _session.UsageCounter != sessionData.UsageCounter {
+	err := row.Scan(&session.SessionID, &session.UsageCounter, &session.Timestamp)
+	if err == sql.ErrNoRows || sessionData.UsageCounter == 0 || session.UsageCounter != sessionData.UsageCounter {
 		new_session, errs := hashBytes(nil, &sessionData)
 
 		if errs != nil {
@@ -81,6 +87,7 @@ func insertSessionData(sessionData SessionData, db *sql.DB) Session {
 
 		db.Query("UPDATE session SET session_id=$1, usage_time=$2, usage=$3 WHERE device_id=$4", 
 		new_session.SessionID, new_session.Timestamp, new_session.UsageCounter, sessionData.DeviceID)
+		println(new_session.SessionID)
 		return new_session
 	} else if err != nil {
 		log.Fatal(err)
@@ -91,12 +98,12 @@ func insertSessionData(sessionData SessionData, db *sql.DB) Session {
 			UsageCounter: sessionData.UsageCounter - 1,
 			Timestamp: time.Now().UTC(),
 		}
+
+		
 		db.Query("UPDATE session SET usage_time=$1, usage=$2 WHERE device_id=$3", 
 		newSession.Timestamp, newSession.UsageCounter, sessionData.DeviceID)
-
 		return newSession
-		
-	}
 
+	}
 
 }

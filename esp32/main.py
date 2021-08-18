@@ -128,14 +128,15 @@ def send_plant_data(temperature: int, humidity: int, soil_moisture: float, light
 	session_id = CONFIGURATIONS.get("sessionID")
 	usage_counter = CONFIGURATIONS.get("usageCounter")
 	timestamp = CONFIGURATIONS.get("timestamp")
-
+	device_id = CONFIGURATIONS.get("deviceID")
 	data = {"sessionID":session_id,
 	"usageCounter":usage_counter,
 	"timestamp": timestamp,
 	"temperature":temperature,
 	"humidity":humidity,
 	"soilMoisture":soil_moisture,
-	"light":light}
+	"light":light, 
+	"deviceID": device_id}
 
 	json_data = ujson.dumps(data)
 

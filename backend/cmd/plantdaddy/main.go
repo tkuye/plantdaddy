@@ -8,15 +8,19 @@ import (
 	"log"
 	"net/http"
 	"strings"
-	"time"
+	"os"
+	"github.com/joho/godotenv"
 )
 
 // Requires initial server request config for login
 
-
-
 func main() {
 	// Initial web server configuration
+	err := godotenv.Load(".env")
+
+	if err != nil {
+		log.Fatal(err)
+	}
 	http.HandleFunc("/auth-device", logIn)
 	http.HandleFunc("/new-data",newSessionData)
 	log.Println("Listening for requests at http://localhost:8000/")
@@ -45,19 +49,13 @@ func logIn(w http.ResponseWriter, r *http.Request) {
 		if jsonDecoder(err, w) != nil {
 			return
 		}
-
+		db := connectToDb(os.Getenv("CONNSTRING"))
 		// From this struct we must now return a bit id to the device. 
-			hashedLogin, errs := hashBytes(&login, nil)
-
-	if errs != nil {
-		http.Error(w, errs.Error(), http.StatusInternalServerError)
-	}
-
-	returnResponse := hashedLogin
+		session := getSession(db, &login)
 
 	
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(returnResponse)
+	json.NewEncoder(w).Encode(session)
 	defer r.Body.Close()
 
     }
@@ -68,7 +66,9 @@ func newSessionData(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method == "POST" {
 	log.Printf("New Request %s", r.URL)
-	
+
+
+
 	if r.Header.Get("Content-Type") != "application/json" {
 			msg := "Content-type header is not application/json"
 			http.Error(w, msg, http.StatusUnsupportedMediaType)
@@ -88,29 +88,15 @@ func newSessionData(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Content-Type", "application/json")
 
+		
 		// Check if out counter has reached zero and return new session
-		if session.UsageCounter == 0 {
-			newSession, err := hashBytes(nil, &session)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			json.NewEncoder(w).Encode(newSession)
-		} else {
-
-			newSession := Session{
-				SessionID: session.SessionID,
-				UsageCounter: session.UsageCounter - 1,
-				Timestamp: time.Now(),
-			}
-			json.NewEncoder(w).Encode(newSession)
-		}
-
+		db := connectToDb(os.Getenv("CONNSTRING"))
+		var newSession = insertSessionData(session, db)
+		json.NewEncoder(w).Encode(newSession)
 		
 	}
 	
 }
-
 
 
 // this function checks if theres any http errors if so then it will write to the response body
