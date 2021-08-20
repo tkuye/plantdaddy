@@ -1,0 +1,3 @@
+[submodule "plantdaddy-native"]
+	path = plantdaddy-native
+	url = https://github.com/tkuye/plantdaddy-native
