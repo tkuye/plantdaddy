@@ -10,9 +10,13 @@ import (
 	"strings"
 	"os"
 	"github.com/joho/godotenv"
+	"github.com/jackc/pgx/v4/pgxpool"
 )
 
 // Requires initial server request config for login
+type API struct {
+	db * pgxpool.Pool
+}
 
 func main() {
 	// Initial web server configuration
@@ -21,13 +25,68 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	http.HandleFunc("/auth-device", logIn)
-	http.HandleFunc("/new-data",newSessionData)
+	api := &API{db: connectToDb(os.Getenv("CONNSTRING"))}
+	http.HandleFunc("/auth-device", api.logIn)
+	http.HandleFunc("/api/new-device", api.newDevice)
+	http.HandleFunc("/api/login", api.logInApp)
+	http.HandleFunc("/new-data",api.newSessionData)
+	http.HandleFunc("/api/new-user", api.newUser)
+	http.HandleFunc("/api/devices", api.getDevices)
 	log.Println("Listening for requests at http://localhost:8000/")
 	log.Fatal(http.ListenAndServe(":8000", nil))
 }
 
-func logIn(w http.ResponseWriter, r *http.Request) {
+func (api * API) getDevices(w http.ResponseWriter, r *http.Request){
+
+	if r.Method == "GET" {
+		log.Printf("New request: %s", r.URL)
+		
+		username := r.URL.Query().Get("username")
+		if username != "" {
+			devices, err := getDevicesDB(api.db, username)
+
+			if err != nil {
+				log.Printf("%s", err)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+			}
+			jsonEncoder := json.NewEncoder(w)
+			jsonEncoder.Encode(devices)
+			defer r.Body.Close()
+		}
+
+		
+	}
+}
+func (api * API) newDevice(w http.ResponseWriter, r *http.Request) {
+	var newDevice NewDevice;
+
+	if r.Method == "POST" {
+
+		log.Printf("New Request %s", r.URL)
+
+	if r.Header.Get("Content-Type") != "application/json" {
+			msg := "Content-type header is not application/json"
+			http.Error(w, msg, http.StatusUnsupportedMediaType)
+			return
+		}
+
+		
+		decoder := json.NewDecoder(r.Body)
+		
+		// Do not allow certain fields that are not approved 
+		decoder.DisallowUnknownFields()
+		err := decoder.Decode(&newDevice)
+
+		if jsonDecoder(err, w) != nil {
+			return
+		}
+
+	 	insertDevice(&newDevice, api.db)
+
+		defer r.Body.Close()
+	}
+}
+func (api * API) logIn(w http.ResponseWriter, r *http.Request) {
 	var login Login;
 	
 	if r.Method == "POST" {
@@ -49,12 +108,15 @@ func logIn(w http.ResponseWriter, r *http.Request) {
 		if jsonDecoder(err, w) != nil {
 			return
 		}
-		db := connectToDb(os.Getenv("CONNSTRING"))
 		// From this struct we must now return a bit id to the device. 
-		session := getSession(db, &login)
+		session, err := getSession(api.db, &login)
 
+		if err != nil {
+			w.Write([]byte(err.Error()))
+		}
 	
 	w.Header().Set("Content-Type", "application/json")
+	
 	json.NewEncoder(w).Encode(session)
 	defer r.Body.Close()
 
@@ -62,7 +124,84 @@ func logIn(w http.ResponseWriter, r *http.Request) {
 
 	}
 
-func newSessionData(w http.ResponseWriter, r *http.Request) {
+
+func (api * API) logInApp(w http.ResponseWriter, r *http.Request) {
+	log.Printf("New request %s", r.URL)
+	if r.Method == "POST" {
+		if r.Header.Get("Content-Type") != "application/json" {
+			msg := "Content-type header is not application/json"
+			http.Error(w, msg, http.StatusUnsupportedMediaType)
+			return
+		}
+
+		decoder := json.NewDecoder(r.Body)
+		var login UserPass;
+		
+		// Do not allow certain fields that are not approved 
+		decoder.DisallowUnknownFields()
+		err := decoder.Decode(&login)
+
+		if jsonDecoder(err, w) != nil {
+			log.Printf("JSON ERROR %s", err)
+			return
+		}
+
+		errs := LogIn(api.db, login)
+
+		if errs != nil {
+			log.Printf("%s",errs.Error())
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(errs.Error()))
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+
+		
+	}
+
+}
+
+func (api * API) newUser(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+	log.Printf("New Request %s", r.URL)
+
+	if r.Header.Get("Content-Type") != "application/json" {
+			msg := "Content-type header is not application/json"
+			http.Error(w, msg, http.StatusUnsupportedMediaType)
+			return
+		}
+
+		var newUser UserPass;
+		decoder := json.NewDecoder(r.Body)
+		
+		// Do not allow certain fields that are not approved 
+		decoder.DisallowUnknownFields()
+		err := decoder.Decode(&newUser)
+
+		if jsonDecoder(err, w) != nil {
+			log.Printf("JSON ERROR %s", err)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+
+		// Check if out counter has reached zero and return new session
+		var errs = insertNewUser(newUser, api.db)
+
+		if errs != nil {
+			w.Write([]byte(err.Error()))
+			
+			return
+			
+		} else {
+			w.WriteHeader(http.StatusOK)
+		}
+		
+	}
+}
+
+func (api * API) newSessionData(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method == "POST" {
 	log.Printf("New Request %s", r.URL)
@@ -90,8 +229,12 @@ func newSessionData(w http.ResponseWriter, r *http.Request) {
 
 		
 		// Check if out counter has reached zero and return new session
-		db := connectToDb(os.Getenv("CONNSTRING"))
-		var newSession = insertSessionData(session, db)
+		var newSession, errs  = insertSessionData(session, api.db)
+
+		if errs != nil {
+			
+			w.Write([]byte(errs.Error()))
+		}
 		json.NewEncoder(w).Encode(newSession)
 		
 	}

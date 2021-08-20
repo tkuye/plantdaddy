@@ -1,27 +1,86 @@
 package main
 
 import (
+	"context"
 	"database/sql"
+	"fmt"
 	"log"
+	"os"
 	"time"
-
+	"github.com/jackc/pgx/v4/pgxpool"
+	
 	_ "github.com/lib/pq"
 )
 
+type FalseError struct {}
 
-func connectToDb(connString string) *sql.DB {
-	db, err := sql.Open("postgres", connString)
+func (e *FalseError) Error() string {
+	return "The passwords do not match."
+}
+
+func connectToDb(connString string) *pgxpool.Pool {
+	db, err := pgxpool.Connect(context.Background(), connString)
 	if err != nil {
-		log.Fatal(err)
+		fmt.Fprintf(os.Stderr, "Unable to connect to database: %v\n", err)
+		os.Exit(1)
 	}
 	
 	return db
 }
 
+func getDevicesDB(db *pgxpool.Pool, username string) ([]Device, error) {
 
-func insertDevice(login Login, username string, db *sql.DB) {
+	var id int64
+	row := db.QueryRow(context.Background(), `SELECT id from auth WHERE username = $1`, username)
+
+	err := row.Scan(&id)
+	if err != nil {
+		return nil, err
+	}
+
 	
-	row:= db.QueryRow("SELECT id FROM auth WHERE username=$1", username)
+	
+
+	rows, errs := db.Query(context.Background(),`SELECT device_name, device_id FROM registered_devices WHERE user_id = $1`, id)
+
+	if errs != nil {
+		return nil, errs
+	}
+	
+	var devices []Device
+
+	defer rows.Close()
+	for rows.Next() {
+		var device Device
+		err := rows.Scan(&device.DeviceName, &device.DeviceID)
+		if err != nil {
+			return nil, err
+		}
+
+		dataRow := db.QueryRow(context.Background(),`SELECT temperature, 
+		humidity, soil_moisture, light, time FROM plant_data 
+		WHERE device_id=$1 ORDER BY time DESC LIMIT 1
+		`, device.DeviceID)
+
+		errs := dataRow.Scan(&device.DeviceData.Temperature, &device.DeviceData.Humidity, 
+		&device.DeviceData.SoilMoisture, &device.DeviceData.Light,&device.DeviceData.Timestamp,
+		)
+		if errs == sql.ErrNoRows {
+			log.Printf("%s", errs)
+		}
+		log.Printf("%v", device)
+		devices = append(devices, device)
+
+	}
+
+	return devices, nil
+
+}
+
+
+func insertDevice(newDevice *NewDevice, db *pgxpool.Pool) error{
+	
+	row:= db.QueryRow(context.Background(), "SELECT id FROM auth WHERE username=$1", newDevice.Username)
 
 	var id int
 
@@ -30,38 +89,82 @@ func insertDevice(login Login, username string, db *sql.DB) {
 	switch {
 	case err == sql.ErrNoRows:
 		log.Printf("no user with id %d\n", id)
+		return err
 	case err != nil:
-		log.Fatalf("query error: %v\n", err)
+		log.Printf("query error: %v\n", err)
+		return err
 	}
 	
-	_, errs := db.Query(`INSERT INTO registered_devices(device_id, user_id, register_date)
-	VALUES($1, $2, $3)
-	`, login.DeviceID, id, time.Now().UTC())
+	_, errs := db.Query(context.Background(),`INSERT INTO registered_devices(device_id, user_id, register_date, device_name)
+	VALUES($1, $2, $3, $4)
+	`, newDevice.DeviceID, id, time.Now().UTC(), newDevice.DeviceName)
 
 	if errs != nil {
-		log.Fatal(errs)
+		log.Printf("%s", errs)
+		return errs
 	}
+	return nil
 }
 
-func getSession(db *sql.DB, login *Login) Session {
+
+func LogIn(db *pgxpool.Pool, user UserPass) error {
+	row := db.QueryRow(context.Background(), "SELECT password FROM auth WHERE username=$1", user.Username)
+	var password string
+	err := row.Scan(&password)
+
+	switch {
+		case err == sql.ErrNoRows:
+			return err
+		case err != nil:
+			return err
+	}
+
+	var checker = CheckPasswordHash(user.Password, password)
+	log.Println(checker)
+	if !checker {
+		return &FalseError{}
+	}
+
+	return nil
+}
+
+
+func getSession(db *pgxpool.Pool, login *Login) (Session, error) {
 
 		hashedLogin, errs := hashBytes(login, nil)
+
 		if errs != nil {
-			log.Fatal(errs)
+			return Session{}, errs
 		}
-		_, err := db.Query(`INSERT INTO session(session_id, usage_time, usage, device_id) VALUES ($1, $2, $3, $4) 
+		_, err := db.Query(context.Background(), `INSERT INTO session(session_id, usage_time, usage, device_id) VALUES ($1, $2, $3, $4) 
 		ON CONFLICT (device_id) DO UPDATE SET session_id=$1, usage_time=$2, usage=$3`, 
 		hashedLogin.SessionID, hashedLogin.Timestamp, hashedLogin.UsageCounter, login.DeviceID)
 
 		if err != nil {
-			log.Fatal(err)
+			return Session{}, err
 		}
 
-		return hashedLogin
+		return hashedLogin, nil
 }
 
-func insertSessionData(sessionData SessionData, db *sql.DB) Session {
-	_, errs := db.Query(`
+func insertNewUser(newUser UserPass , db *pgxpool.Pool) error {
+	password, errs := HashPassword(newUser.Password)
+
+	if errs != nil {
+		log.Printf("%s", errs)
+		return errs 
+	}
+	_, err := db.Query(context.Background(), `INSERT INTO auth(username, password) VALUES ($1, $2)`, newUser.Username, password)
+
+	if err != nil {
+		log.Printf("%s", err)
+		return err
+	}
+	return nil
+}
+
+func insertSessionData(sessionData SessionData, db *pgxpool.Pool) (Session, error) {
+	_, errs := db.Query(context.Background(),`
 	INSERT INTO plant_data(device_id, time, temperature, humidity, soil_moisture, light)
 	VALUES ($1, $2, $3, $4, $5, $6)
 	`, sessionData.DeviceID, time.Now().UTC(), 
@@ -71,10 +174,10 @@ func insertSessionData(sessionData SessionData, db *sql.DB) Session {
 	sessionData.Light)
 
 	if errs != nil {
-		log.Fatal(errs)
+		return Session{}, errs
 	}
 
-	row := db.QueryRow("SELECT session_id, usage, usage_time FROM session WHERE session_id=$1", sessionData.SessionID)
+	row := db.QueryRow(context.Background(),"SELECT session_id, usage, usage_time FROM session WHERE session_id=$1", sessionData.SessionID)
 	var session Session
 
 	err := row.Scan(&session.SessionID, &session.UsageCounter, &session.Timestamp)
@@ -82,16 +185,15 @@ func insertSessionData(sessionData SessionData, db *sql.DB) Session {
 		new_session, errs := hashBytes(nil, &sessionData)
 
 		if errs != nil {
-			log.Fatal(errs)
+			return Session{}, errs
 		}
 
-		db.Query("UPDATE session SET session_id=$1, usage_time=$2, usage=$3 WHERE device_id=$4", 
+		db.Query(context.Background(),"UPDATE session SET session_id=$1, usage_time=$2, usage=$3 WHERE device_id=$4", 
 		new_session.SessionID, new_session.Timestamp, new_session.UsageCounter, sessionData.DeviceID)
-		println(new_session.SessionID)
-		return new_session
+		return new_session, nil
 	} else if err != nil {
-		log.Fatal(err)
-		return Session{}
+		
+		return Session{}, errs
 	} else {
 		newSession := Session{
 			SessionID: sessionData.SessionID,
@@ -99,11 +201,9 @@ func insertSessionData(sessionData SessionData, db *sql.DB) Session {
 			Timestamp: time.Now().UTC(),
 		}
 
-		
-		db.Query("UPDATE session SET usage_time=$1, usage=$2 WHERE device_id=$3", 
+		db.Query(context.Background(),"UPDATE session SET usage_time=$1, usage=$2 WHERE device_id=$3", 
 		newSession.Timestamp, newSession.UsageCounter, sessionData.DeviceID)
-		return newSession
-
+		return newSession, nil
 	}
 
 }
