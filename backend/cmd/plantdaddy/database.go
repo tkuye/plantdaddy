@@ -68,7 +68,6 @@ func getDevicesDB(db *pgxpool.Pool, username string) ([]Device, error) {
 		if errs == sql.ErrNoRows {
 			log.Printf("%s", errs)
 		}
-		log.Printf("%v", device)
 		devices = append(devices, device)
 
 	}
