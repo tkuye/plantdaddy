@@ -7,10 +7,11 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"strings"
 	"os"
-	"github.com/joho/godotenv"
+	"strings"
+
 	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/joho/godotenv"
 )
 
 // Requires initial server request config for login
@@ -27,6 +28,7 @@ func main() {
 	}
 	api := &API{db: connectToDb(os.Getenv("CONNSTRING"))}
 	http.HandleFunc("/auth-device", api.logIn)
+
 	http.HandleFunc("/api/new-device", api.newDevice)
 	http.HandleFunc("/api/login", api.logInApp)
 	http.HandleFunc("/new-data",api.newSessionData)
@@ -36,6 +38,9 @@ func main() {
 	log.Fatal(http.ListenAndServe(":8000", nil))
 }
 
+
+
+	
 func (api * API) getDevices(w http.ResponseWriter, r *http.Request){
 
 	if r.Method == "GET" {
@@ -67,7 +72,7 @@ func (api * API) newDevice(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("Content-Type") != "application/json" {
 			msg := "Content-type header is not application/json"
 			http.Error(w, msg, http.StatusUnsupportedMediaType)
-			return
+			
 		}
 
 		
@@ -95,7 +100,7 @@ func (api * API) logIn(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Content-Type") != "application/json" {
 			msg := "Content-type header is not application/json"
 			http.Error(w, msg, http.StatusUnsupportedMediaType)
-			return
+			
 		}
 
 		// Decoder our data into json.
@@ -106,7 +111,7 @@ func (api * API) logIn(w http.ResponseWriter, r *http.Request) {
 		err := decoder.Decode(&login)
 
 		if jsonDecoder(err, w) != nil {
-			return
+			http.Error(w, err.Error(), http.StatusBadRequest)
 		}
 		// From this struct we must now return a bit id to the device. 
 		session, err := getSession(api.db, &login)
@@ -131,7 +136,7 @@ func (api * API) logInApp(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Content-Type") != "application/json" {
 			msg := "Content-type header is not application/json"
 			http.Error(w, msg, http.StatusUnsupportedMediaType)
-			return
+			
 		}
 
 		decoder := json.NewDecoder(r.Body)
@@ -143,7 +148,7 @@ func (api * API) logInApp(w http.ResponseWriter, r *http.Request) {
 
 		if jsonDecoder(err, w) != nil {
 			log.Printf("JSON ERROR %s", err)
-			return
+			
 		}
 
 		errs := LogIn(api.db, login)
@@ -152,12 +157,12 @@ func (api * API) logInApp(w http.ResponseWriter, r *http.Request) {
 			log.Printf("%s",errs.Error())
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte(errs.Error()))
-			return
+			
 		}
 
 		w.WriteHeader(http.StatusOK)
 
-		
+		defer r.Body.Close()
 	}
 
 }
@@ -169,7 +174,7 @@ func (api * API) newUser(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("Content-Type") != "application/json" {
 			msg := "Content-type header is not application/json"
 			http.Error(w, msg, http.StatusUnsupportedMediaType)
-			return
+			
 		}
 
 		var newUser UserPass;
@@ -181,7 +186,7 @@ func (api * API) newUser(w http.ResponseWriter, r *http.Request) {
 
 		if jsonDecoder(err, w) != nil {
 			log.Printf("JSON ERROR %s", err)
-			return
+			
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -192,12 +197,12 @@ func (api * API) newUser(w http.ResponseWriter, r *http.Request) {
 		if errs != nil {
 			w.Write([]byte(err.Error()))
 			
-			return
+			
 			
 		} else {
 			w.WriteHeader(http.StatusOK)
 		}
-		
+		defer r.Body.Close()
 	}
 }
 
@@ -211,7 +216,7 @@ func (api * API) newSessionData(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("Content-Type") != "application/json" {
 			msg := "Content-type header is not application/json"
 			http.Error(w, msg, http.StatusUnsupportedMediaType)
-			return
+			
 		}
 
 		var session SessionData;
@@ -222,13 +227,14 @@ func (api * API) newSessionData(w http.ResponseWriter, r *http.Request) {
 		err := decoder.Decode(&session)
 
 		if jsonDecoder(err, w) != nil {
-			return
+			http.Error(w, err.Error(), http.StatusBadRequest)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 
 		
 		// Check if out counter has reached zero and return new session
+		
 		var newSession, errs  = insertSessionData(session, api.db)
 
 		if errs != nil {
@@ -237,6 +243,7 @@ func (api * API) newSessionData(w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewEncoder(w).Encode(newSession)
 		
+		defer r.Body.Close()
 	}
 	
 }
