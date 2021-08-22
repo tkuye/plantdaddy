@@ -21,7 +21,7 @@ type API struct {
 }
 
 
-
+// Main function to begin our app and run the server.
 func main() {
 	// Initial web server configuration
 	err := godotenv.Load(".env")
@@ -34,6 +34,7 @@ func main() {
 
 	
 	api := &API{db: connectToDb(os.Getenv("CONNSTRING"))}
+	defer api.db.Close()
 	http.HandleFunc("/auth-device", api.logIn)
 	http.HandleFunc("/api/new-device", api.newDevice)
 	http.HandleFunc("/api/login", api.logInApp)
@@ -41,6 +42,7 @@ func main() {
 	http.HandleFunc("/api/new-user", api.newUser)
 	http.HandleFunc("/api/devices", api.getDevices)
 	http.HandleFunc("/api/get-daily-data", api.getDailyData)
+	http.HandleFunc("/api/get-device", api.getDevice)
 	http.HandleFunc("/api/device-name", api.changeDeviceName)
 	http.HandleFunc("/api/delete-device", api.deleteDevice)
 	log.Println("Listening for requests at http://localhost:8000/")
@@ -54,6 +56,22 @@ func main() {
 	log.Fatal(server.ListenAndServe())
 }
 
+// HTTP Call to get the device associated with a given user.
+func (api *API) getDevice(w http.ResponseWriter, r *http.Request){
+	defer r.Body.Close()
+
+	if r.Method == "GET" {
+		log.Printf("New Request %s", r.URL.String())
+		deviceID := r.URL.Query().Get("deviceID")
+
+		device, err := getDeviceDB(api.db, deviceID)
+
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+		json.NewEncoder(w).Encode(device)
+	}
+}
 
 func (api * API) deleteDevice(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
@@ -65,6 +83,7 @@ func (api * API) deleteDevice(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// HTTP Call to change the device
 func (api * API) changeDeviceName(w http.ResponseWriter, r *http.Request){
 	defer r.Body.Close()
 	if r.Method == "POST" {
@@ -78,6 +97,7 @@ func (api * API) changeDeviceName(w http.ResponseWriter, r *http.Request){
 			return
 		}
 
+		// We dont return anything from this funtion unless there is an error that is written to the w stream
 		errs := changeDeviceName(api.db, name)
 
 		if errs != nil {
@@ -86,9 +106,11 @@ func (api * API) changeDeviceName(w http.ResponseWriter, r *http.Request){
 
 	}
 }	
-	
-func (api * API) getDevices(w http.ResponseWriter, r *http.Request){
 
+
+// HTTP Call to query for all devices associated with a user
+func (api * API) getDevices(w http.ResponseWriter, r *http.Request){
+	defer r.Body.Close()
 	if r.Method == "GET" {
 		log.Printf("New request: %s", r.URL)
 		
@@ -102,7 +124,7 @@ func (api * API) getDevices(w http.ResponseWriter, r *http.Request){
 			}
 			jsonEncoder := json.NewEncoder(w)
 			jsonEncoder.Encode(devices)
-			defer r.Body.Close()
+			
 		}
 
 		
@@ -111,10 +133,10 @@ func (api * API) getDevices(w http.ResponseWriter, r *http.Request){
 
 
 
-
+// HTTP Call to add a device to the database for a given user
 func (api * API) newDevice(w http.ResponseWriter, r *http.Request) {
 	var newDevice NewDevice;
-
+	defer r.Body.Close()
 	if r.Method == "POST" {
 
 		log.Printf("New Request %s", r.URL)
@@ -138,12 +160,14 @@ func (api * API) newDevice(w http.ResponseWriter, r *http.Request) {
 
 	 	insertDevice(&newDevice, api.db)
 
-		defer r.Body.Close()
+		
 	}
 }
+
+// HTTP call to login as the device if there is no session data available
 func (api * API) logIn(w http.ResponseWriter, r *http.Request) {
 	var login Login;
-	
+	defer r.Body.Close()
 	if r.Method == "POST" {
 		log.Printf("New Request %s", r.URL)
 		// Check if the content type is correct
@@ -176,13 +200,13 @@ func (api * API) logIn(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	
 	json.NewEncoder(w).Encode(session)
-	defer r.Body.Close()
+	
 
     }
 
 	}
 
-
+// HTTP Call to query for the data associated with a given day
 func (api * API) getDailyData(w http.ResponseWriter, r *http.Request){
 	defer r.Body.Close()
 
@@ -208,12 +232,14 @@ func (api * API) getDailyData(w http.ResponseWriter, r *http.Request){
 		if errs != nil {
 			http.Error(w, "Error encoding latest data day", http.StatusBadGateway)
 		}
-		defer r.Body.Close()
+		
 	}
 }
 
+// HTTP Call to login as a user on the ios/android app
 func (api * API) logInApp(w http.ResponseWriter, r *http.Request) {
 	log.Printf("New request %s", r.URL)
+	defer r.Body.Close()
 	if r.Method == "POST" {
 		if r.Header.Get("Content-Type") != "application/json" {
 			msg := "Content-type header is not application/json"
@@ -223,7 +249,7 @@ func (api * API) logInApp(w http.ResponseWriter, r *http.Request) {
 		
 		decoder := json.NewDecoder(r.Body)
 		var login UserPass;
-		log.Printf("COULD CREATE DECODER")
+		
 		// Do not allow certain fields that are not approved 
 		decoder.DisallowUnknownFields()
 		err := decoder.Decode(&login)
@@ -232,9 +258,8 @@ func (api * API) logInApp(w http.ResponseWriter, r *http.Request) {
 			log.Printf("JSON ERROR %s", err)
 			
 		}
-		log.Printf("BEFORE LOGIN")
+		
 		errs := LogIn(api.db, login)
-		log.Printf("AFTER LOGIN")
 		if errs != nil {
 			log.Printf("%s",errs.Error())
 			w.WriteHeader(http.StatusInternalServerError)
@@ -248,7 +273,7 @@ func (api * API) logInApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 }
-
+// HTTP Call to add a new user to the database
 func (api * API) newUser(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "POST" {
 	log.Printf("New Request %s", r.URL)
@@ -284,15 +309,14 @@ func (api * API) newUser(w http.ResponseWriter, r *http.Request) {
 		} else {
 			w.WriteHeader(http.StatusOK)
 		}
-		defer r.Body.Close()
+		
 	}
 }
-
+// HTTP Call to add new session data to the database
 func (api * API) newSessionData(w http.ResponseWriter, r *http.Request) {
-
+	defer r.Body.Close()
 	if r.Method == "POST" {
 	log.Printf("New Request %s", r.URL)
-
 
 
 	if r.Header.Get("Content-Type") != "application/json" {
@@ -313,11 +337,11 @@ func (api * API) newSessionData(w http.ResponseWriter, r *http.Request) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-
 		
 		// Check if out counter has reached zero and return new session
-		
+		log.Printf("ABOUT TO INSERT")
 		var newSession, errs  = insertSessionData(session, api.db)
+		log.Printf("FINISHED INSERT DATA")
 
 		if errs != nil {
 			
@@ -325,7 +349,7 @@ func (api * API) newSessionData(w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewEncoder(w).Encode(newSession)
 		
-		defer r.Body.Close()
+		
 	}
 	
 }
