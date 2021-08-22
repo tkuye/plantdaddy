@@ -9,15 +9,18 @@ import (
 	"net/http"
 	"os"
 	"strings"
-
 	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/joho/godotenv"
+	"time"
+	
 )
 
 // Requires initial server request config for login
 type API struct {
 	db * pgxpool.Pool
 }
+
+
 
 func main() {
 	// Initial web server configuration
@@ -26,20 +29,63 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	logger := log.New(os.Stdout, "http: ", log.Flags())
+
+	
 	api := &API{db: connectToDb(os.Getenv("CONNSTRING"))}
 	http.HandleFunc("/auth-device", api.logIn)
-
 	http.HandleFunc("/api/new-device", api.newDevice)
 	http.HandleFunc("/api/login", api.logInApp)
 	http.HandleFunc("/new-data",api.newSessionData)
 	http.HandleFunc("/api/new-user", api.newUser)
 	http.HandleFunc("/api/devices", api.getDevices)
+	http.HandleFunc("/api/get-daily-data", api.getDailyData)
+	http.HandleFunc("/api/device-name", api.changeDeviceName)
+	http.HandleFunc("/api/delete-device", api.deleteDevice)
 	log.Println("Listening for requests at http://localhost:8000/")
-	log.Fatal(http.ListenAndServe(":8000", nil))
+	server := &http.Server{
+		ReadTimeout: 5 * time.Second,
+    	WriteTimeout:5 * time.Second,
+		Addr:           ":8000",
+		IdleTimeout:  5 * time.Second,
+		ErrorLog: logger,
+	}
+	log.Fatal(server.ListenAndServe())
 }
 
 
+func (api * API) deleteDevice(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	
+	if r.Method == "DELETE" {
+		deviceID := r.URL.Query().Get("deviceID")
 
+		deleteDeviceDB(api.db, deviceID)
+	}
+}
+
+func (api * API) changeDeviceName(w http.ResponseWriter, r *http.Request){
+	defer r.Body.Close()
+	if r.Method == "POST" {
+		jsonEncoder := json.NewDecoder(r.Body)
+		jsonEncoder.DisallowUnknownFields()
+		var name deviceName
+		
+		err := jsonEncoder.Decode(&name)
+
+		if jsonDecoder(err, w) != nil {
+			return
+		}
+
+		errs := changeDeviceName(api.db, name)
+
+		if errs != nil {
+			http.Error(w, "Error updating device name", http.StatusInternalServerError)
+		}
+
+	}
+}	
 	
 func (api * API) getDevices(w http.ResponseWriter, r *http.Request){
 
@@ -62,6 +108,10 @@ func (api * API) getDevices(w http.ResponseWriter, r *http.Request){
 		
 	}
 }
+
+
+
+
 func (api * API) newDevice(w http.ResponseWriter, r *http.Request) {
 	var newDevice NewDevice;
 
@@ -105,6 +155,7 @@ func (api * API) logIn(w http.ResponseWriter, r *http.Request) {
 
 		// Decoder our data into json.
 		decoder := json.NewDecoder(r.Body)
+
 		
 		// Do not allow certain fields that are not approved 
 		decoder.DisallowUnknownFields()
@@ -112,11 +163,13 @@ func (api * API) logIn(w http.ResponseWriter, r *http.Request) {
 
 		if jsonDecoder(err, w) != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
+			log.Printf("%s", err.Error())
 		}
 		// From this struct we must now return a bit id to the device. 
 		session, err := getSession(api.db, &login)
 
 		if err != nil {
+			log.Printf("%s", err.Error())
 			w.Write([]byte(err.Error()))
 		}
 	
@@ -130,18 +183,47 @@ func (api * API) logIn(w http.ResponseWriter, r *http.Request) {
 	}
 
 
+func (api * API) getDailyData(w http.ResponseWriter, r *http.Request){
+	defer r.Body.Close()
+
+	if r.Method == "GET" {
+		deviceID := r.URL.Query().Get("deviceID")
+		timePeriod := r.URL.Query().Get("timePeriod")
+		
+		if deviceID == "" {
+			http.Error(w, "Must provide deviceID", http.StatusBadRequest)
+		} 
+		if timePeriod == "" {
+			http.Error(w, "Must provide timePeriod", http.StatusBadRequest)
+		}
+		
+		mapper, err := getLatestDataDay(api.db, timePeriod, deviceID)
+
+		if err != nil {
+			http.Error(w, "Error getting latest data day", http.StatusBadGateway)
+		}
+
+
+		errs := json.NewEncoder(w).Encode(mapper)
+		if errs != nil {
+			http.Error(w, "Error encoding latest data day", http.StatusBadGateway)
+		}
+		defer r.Body.Close()
+	}
+}
+
 func (api * API) logInApp(w http.ResponseWriter, r *http.Request) {
 	log.Printf("New request %s", r.URL)
 	if r.Method == "POST" {
 		if r.Header.Get("Content-Type") != "application/json" {
 			msg := "Content-type header is not application/json"
 			http.Error(w, msg, http.StatusUnsupportedMediaType)
-			
+			log.Printf("NOT CONTENT TYPE")
 		}
-
+		
 		decoder := json.NewDecoder(r.Body)
 		var login UserPass;
-		
+		log.Printf("COULD CREATE DECODER")
 		// Do not allow certain fields that are not approved 
 		decoder.DisallowUnknownFields()
 		err := decoder.Decode(&login)
@@ -150,9 +232,9 @@ func (api * API) logInApp(w http.ResponseWriter, r *http.Request) {
 			log.Printf("JSON ERROR %s", err)
 			
 		}
-
+		log.Printf("BEFORE LOGIN")
 		errs := LogIn(api.db, login)
-
+		log.Printf("AFTER LOGIN")
 		if errs != nil {
 			log.Printf("%s",errs.Error())
 			w.WriteHeader(http.StatusInternalServerError)

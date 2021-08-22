@@ -9,6 +9,7 @@ import (
 	"time"
 	"github.com/jackc/pgx/v4/pgxpool"
 	
+	
 	_ "github.com/lib/pq"
 )
 
@@ -28,11 +29,78 @@ func connectToDb(connString string) *pgxpool.Pool {
 	return db
 }
 
+
+func changeDeviceName(db *pgxpool.Pool, devName deviceName) error {
+	_, err := db.Query(context.Background(), "UPDATE registered_devices SET device_name = $1 WHERE device_id=$2" ,devName.DeviceName, devName.DeviceID)
+	
+	if err != nil {
+		return err
+	}
+	
+	return nil
+}
+
+
+func deleteDeviceDB(db *pgxpool.Pool, deviceID string) error {
+	_, err := db.Query(context.Background(), "DELETE FROM registered_devices WHERE device_id=$1", deviceID)
+
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func getLatestDataDay(db *pgxpool.Pool, date string, deviceId string) (map[int]DeviceHourData, error) {
+	rows, err := db.Query(context.Background(), `
+	SELECT temperature, humidity, soil_moisture, light, time FROM plant_data 
+	WHERE time::date = $1 AND device_id = $2
+	`, date, deviceId)
+	dayMap := make(map[int]DeviceHourData)
+	if err != nil {
+		log.Printf("error %s", err)
+		return nil, err
+	}
+	for rows.Next() {
+	var time time.Time
+	var deviceData DeviceHourData
+	deviceData.DeviceNumber = 1
+	errs := rows.Scan(&deviceData.Temperature, &deviceData.Humidity, &deviceData.SoilMoisture, &deviceData.Light, &time)
+
+	if errs != nil {
+		log.Printf("%s", errs)
+		return nil, errs
+	}
+	if val, ok := dayMap[time.Hour()]; ok {
+		val.Humidity += deviceData.Humidity
+		val.Temperature += deviceData.Temperature
+		val.SoilMoisture += deviceData.SoilMoisture
+		val.Light += deviceData.Light
+		val.DeviceNumber += 1
+		dayMap[time.Hour()] = val
+	} else {
+		deviceData.TimePeriod = time.Hour()
+		dayMap[time.Hour()] = deviceData
+	}
+	
+	}
+		// dayMap is a map[int]interface.
+		// loop over keys and values in the map.
+		for k, v := range dayMap {
+			v.Humidity /= float64(v.DeviceNumber)
+			v.Temperature /= float64(v.DeviceNumber)
+			v.Light /= float64(v.DeviceNumber)
+			v.SoilMoisture /= float64(v.DeviceNumber)
+			dayMap[k] = v
+		}
+
+	return dayMap, nil
+}
+
 func getDevicesDB(db *pgxpool.Pool, username string) ([]Device, error) {
 
 	var id int64
 	row := db.QueryRow(context.Background(), `SELECT id from auth WHERE username = $1`, username)
-
+	
 	err := row.Scan(&id)
 	if err != nil {
 		return nil, err
@@ -110,7 +178,7 @@ func LogIn(db *pgxpool.Pool, user UserPass) error {
 	row := db.QueryRow(context.Background(), "SELECT password FROM auth WHERE username=$1", user.Username)
 	var password string
 	err := row.Scan(&password)
-
+	log.Printf("%s", db.Stat().AcquireDuration().String())
 	switch {
 		case err == sql.ErrNoRows:
 			return err
@@ -131,7 +199,7 @@ func LogIn(db *pgxpool.Pool, user UserPass) error {
 func getSession(db *pgxpool.Pool, login *Login) (Session, error) {
 
 		hashedLogin, errs := hashBytes(login, nil)
-
+		
 		if errs != nil {
 			return Session{}, errs
 		}
@@ -148,7 +216,7 @@ func getSession(db *pgxpool.Pool, login *Login) (Session, error) {
 
 func insertNewUser(newUser UserPass , db *pgxpool.Pool) error {
 	password, errs := HashPassword(newUser.Password)
-
+	
 	if errs != nil {
 		log.Printf("%s", errs)
 		return errs 
@@ -163,7 +231,9 @@ func insertNewUser(newUser UserPass , db *pgxpool.Pool) error {
 }
 
 func insertSessionData(sessionData SessionData, db *pgxpool.Pool) (Session, error) {
+	
 	_, errs := db.Query(context.Background(),`
+	
 	INSERT INTO plant_data(device_id, time, temperature, humidity, soil_moisture, light)
 	VALUES ($1, $2, $3, $4, $5, $6)
 	`, sessionData.DeviceID, time.Now().UTC(), 
