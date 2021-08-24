@@ -2,7 +2,7 @@
 ### This is the script to run the majority of the microcontrollers code. This
 ### It has three components: The dht, light and moisture sensor parts.
 
-from boot import get_configs
+from helpers import get_configs
 import machine
 from machine import ADC, Pin
 import dht
@@ -142,6 +142,11 @@ def send_plant_data(temperature: int, humidity: int, soil_moisture: float, light
 
 	res = post_data("/new-data", json_data)
 	for key, value in res.json().items():
+		if key == "sessionID" and value == "":
+			CONFIGURATIONS.pop("ssid")
+			CONFIGURATIONS.pop("password")
+			write_to_config()
+			machine.reset()
 		CONFIGURATIONS[key] = value
 	write_to_config()
 
@@ -157,8 +162,6 @@ def main():
 	# If is is none now we send our request to get one.
 	if sessionID is None:
 		get_session_id()
-	
-
 
 	try:
 		light = get_light_level()
@@ -176,5 +179,3 @@ def main():
 	except RuntimeError:
 		pass
 
-if __name__ == "__main__":
-	main()
