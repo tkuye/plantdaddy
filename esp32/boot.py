@@ -15,7 +15,13 @@ if __name__ == "__main__":
         if "ssid" not in config or "password" not in config:
             pbluetooth.main()
         else:
-            c = do_connect(config.get("ssid"), config.get("password"))
-            if c:
-                main.main()
-        
+            try:
+                c = do_connect(config.get("ssid"), config.get("password"))
+                print(c)
+                if c:
+                    main.main()
+                else:
+                    pbluetooth.main()
+            except OSError as e:
+                print(e)
+                pbluetooth.main()

@@ -27,8 +27,7 @@ def do_connect(ssid: str, password: str) -> bool:
         sta_if.connect(ssid, password)
         time = utime.time()
         while not sta_if.isconnected():
-            # timeout after 10 seconds
-            if utime.time() - time > 10:
+            if time.time() - time > 15:
                 return False
     print('network config:', sta_if.ifconfig())
     return True
