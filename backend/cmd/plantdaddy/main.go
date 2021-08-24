@@ -236,6 +236,7 @@ func (api * API) getDailyData(w http.ResponseWriter, r *http.Request){
 	}
 }
 
+
 // HTTP Call to login as a user on the ios/android app
 func (api * API) logInApp(w http.ResponseWriter, r *http.Request) {
 	log.Printf("New request %s", r.URL)
@@ -340,13 +341,10 @@ func (api * API) newSessionData(w http.ResponseWriter, r *http.Request) {
 		
 		// Check if out counter has reached zero and return new session
 		log.Printf("ABOUT TO INSERT")
-		var newSession, errs  = insertSessionData(session, api.db)
+		var newSession, _  = insertSessionData(session, api.db)
 		log.Printf("FINISHED INSERT DATA")
+		
 
-		if errs != nil {
-			
-			w.Write([]byte(errs.Error()))
-		}
 		json.NewEncoder(w).Encode(newSession)
 		
 		

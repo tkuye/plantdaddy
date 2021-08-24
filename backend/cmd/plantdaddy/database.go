@@ -175,7 +175,7 @@ func getDevicesDB(db *pgxpool.Pool, username string) ([]Device, error) {
 
 // DB Query to connect to database and and insert a new device.
 func insertDevice(newDevice *NewDevice, db *pgxpool.Pool) error{
-	
+	log.Printf("DEVICE: %s %s", newDevice.DeviceName, newDevice.DeviceID)
 	row:= db.QueryRow(context.Background(), "SELECT id FROM auth WHERE username=$1", newDevice.Username)
 
 	var id int
@@ -225,6 +225,8 @@ func LogIn(db *pgxpool.Pool, user UserPass) error {
 	return nil
 }
 
+
+
 // DB Query to connect to database and get a new device session for the device
 func getSession(db *pgxpool.Pool, login *Login) (Session, error) {
 
@@ -273,10 +275,22 @@ func insertSessionData(sessionData SessionData, db *pgxpool.Pool) (Session, erro
 	sessionData.Humidity, 
 	sessionData.SoilMoisture, 
 	sessionData.Light)
+	if errs == sql.ErrNoRows {
+		return Session{
+			SessionID: "",
+			UsageCounter: 0,
+			Timestamp: time.Now(),
+		}, errs
+	}
 
+	
 	if errs != nil {
 		log.Printf("%s", errs)
-		return Session{}, errs
+		return Session{
+			SessionID: "",
+			UsageCounter: 0,
+			Timestamp: time.Now(),
+		}, errs
 	}
 
 	row := db.QueryRow(context.Background(),"SELECT session_id, usage, usage_time FROM session WHERE session_id=$1", sessionData.SessionID)
