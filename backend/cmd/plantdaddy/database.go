@@ -176,7 +176,7 @@ func getDevicesDB(db *pgxpool.Pool, username string) ([]Device, error) {
 // DB Query to connect to database and and insert a new device.
 func insertDevice(newDevice *NewDevice, db *pgxpool.Pool) error{
 	log.Printf("DEVICE: %s %s", newDevice.DeviceName, newDevice.DeviceID)
-	row:= db.QueryRow(context.Background(), "SELECT id FROM auth WHERE username=$1", newDevice.Username)
+	row:= db.QueryRow(context.Background(), "SELECT id FROM auth WHERE LOWER(username)=LOWER($1)", newDevice.Username)
 
 	var id int
 
@@ -204,7 +204,7 @@ func insertDevice(newDevice *NewDevice, db *pgxpool.Pool) error{
 
 // DB Query to connect to database and log in as the device with a given username and password.
 func LogIn(db *pgxpool.Pool, user UserPass) error {
-	row := db.QueryRow(context.Background(), "SELECT password FROM auth WHERE username=$1 OR email=$1", user.Username)
+	row := db.QueryRow(context.Background(), "SELECT password FROM auth WHERE LOWER(username)=LOWER($1) OR LOWER(email)=LOWER($1)", user.Username)
 	var password string
 
 	err := row.Scan(&password)
