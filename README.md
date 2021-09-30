@@ -8,7 +8,7 @@ Plant Daddy is the only daddy your plant will ever need :)
 | [**db**](./db)    | This directory holds the database schema.| 
 | [**esp32**](./esp32) | This directory holds the code for the microcontroller. | 
 | [**backend**](./backend) | This directory holds the backend programming for the api interface used with the native application. |
-| [**plantdaddy-native**](tkuye/plantdaddy-native)| This directory holds the frontend react native code used for the mobile interface.|
+| [**plantdaddy-native**](/tkuye/plantdaddy-native)| This directory holds the frontend react native code used for the mobile interface.|
 
 
 ## Usage 
